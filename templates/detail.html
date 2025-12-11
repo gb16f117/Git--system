@@ -1,0 +1,433 @@
+{% extends "base.html" %}
+
+{% block title %}{{ prescription_name if prescription_name else '药方详情' }} - 中药方管理系统{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 mx-auto">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="card-title mb-0">
+                    <i class="bi bi-file-medical"></i> 药方详情
+                </h4>
+                <div>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="goBack()">
+                        <i class="bi bi-arrow-left"></i> 返回
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm ms-2" onclick="editPrescription()">
+                        <i class="bi bi-pencil"></i> 编辑
+                    </button>
+                </div>
+            </div>
+            
+            <div class="card-body" id="prescriptionDetail">
+                <div class="text-center py-5">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">加载中...</span>
+                    </div>
+                    <p class="mt-2">正在加载药方详情...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 相关药方推荐 -->
+        <div class="card mt-4" id="relatedPrescriptions" style="display: none;">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-diagram-3"></i> 相关药方推荐
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="relatedList">
+                    <!-- 相关药方列表将在这里动态生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 编辑模态框 -->
+<div class="modal fade" id="editPrescriptionModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">编辑药方</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editPrescriptionForm">
+                    <input type="hidden" name="id" id="editId">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">药方名称 <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="name" id="editName" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">分类</label>
+                            <select class="form-select" name="category" id="editCategory">
+                                <option value="">选择分类...</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">治疗疗效 <span class="text-danger">*</span></label>
+                        <textarea class="form-control" name="efficacy" id="editEfficacy" rows="2" required></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">适应症标签</label>
+                        <textarea class="form-control" name="symptoms" id="editSymptoms" rows="2" 
+                                placeholder="请用逗号分隔，如：头疼,发热,咳嗽"></textarea>
+                        <div class="form-text">可添加多个适应症标签，用逗号分隔，便于搜索</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">主要成分</label>
+                        <textarea class="form-control" name="ingredients" id="editIngredients" rows="3"></textarea>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">用法用量</label>
+                            <textarea class="form-control" name="usage" id="editUsage" rows="2"></textarea>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">注意事项</label>
+                            <textarea class="form-control" name="precautions" id="editPrecautions" rows="2"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">来源/出处</label>
+                        <input type="text" class="form-control" name="source" id="editSource">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="updatePrescription()">保存修改</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let prescriptionData = null;
+const prescriptionId = {{ prescription_id }};
+
+// 页面加载完成后执行
+document.addEventListener('DOMContentLoaded', function() {
+    loadPrescriptionDetail();
+    loadCategories();
+});
+
+// 加载药方详情
+function loadPrescriptionDetail() {
+    fetch(`/api/prescriptions/${prescriptionId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                showError(data.error);
+                return;
+            }
+            
+            prescriptionData = data;
+            displayPrescriptionDetail(data);
+            loadRelatedPrescriptions(data);
+        })
+        .catch(error => {
+            showError('加载药方详情失败');
+        });
+}
+
+// 显示药方详情
+function displayPrescriptionDetail(prescription) {
+    const container = document.getElementById('prescriptionDetail');
+    
+    const html = `
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <h3 class="text-primary">${prescription.name}</h3>
+                <p class="text-muted mb-2">
+                    <i class="bi bi-book"></i> 来源：${prescription.source || '未知'}
+                </p>
+            </div>
+            <div class="col-md-4 text-end">
+                <span class="badge bg-info fs-6">${prescription.category || '未分类'}</span>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-12">
+                <div class="mb-4">
+                    <h5 class="text-success">
+                        <i class="bi bi-star"></i> 治疗疗效
+                    </h5>
+                    <div class="bg-light p-3 rounded">
+                        <p class="mb-0">${prescription.efficacy}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        ${prescription.symptoms ? `
+        <div class="row">
+            <div class="col-md-12">
+                <div class="mb-4">
+                    <h5 class="text-info">
+                        <i class="bi bi-tags"></i> 适应症标签
+                    </h5>
+                    <div class="bg-light p-3 rounded">
+                        <div class="symptoms-tags">
+                            ${prescription.symptoms.split(/[,，、]/).map(tag => 
+                                `<span class="badge bg-info me-2 mb-2">${tag.trim()}</span>`
+                            ).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        ` : ''}
+        
+        <div class="row">
+            <div class="col-md-12">
+                <div class="mb-4">
+                    <h5 class="text-primary">
+                        <i class="bi bi-capsule"></i> 主要成分
+                    </h5>
+                    <div class="bg-light p-3 rounded">
+                        <p class="mb-0">${prescription.ingredients || '暂无信息'}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="mb-4">
+                    <h5 class="text-warning">
+                        <i class="bi bi-droplet"></i> 用法用量
+                    </h5>
+                    <div class="bg-light p-3 rounded">
+                        <p class="mb-0">${prescription.usage || '暂无信息'}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="mb-4">
+                    <h5 class="text-danger">
+                        <i class="bi bi-exclamation-triangle"></i> 注意事项
+                    </h5>
+                    <div class="bg-light p-3 rounded">
+                        <p class="mb-0">${prescription.precautions || '暂无信息'}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center border-top pt-3">
+                    <small class="text-muted">
+                        <i class="bi bi-calendar"></i> 创建时间：${formatDate(prescription.created_at)}
+                    </small>
+                    <small class="text-muted">
+                        <i class="bi bi-pencil"></i> 更新时间：${formatDate(prescription.updated_at)}
+                    </small>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+// 加载相关药方
+function loadRelatedPrescriptions(prescription) {
+    // 使用疗效关键词搜索相关药方
+    const keywords = prescription.efficacy.split(/[，、，]/).slice(0, 2).join(' ');
+    
+    if (!keywords) return;
+    
+    fetch(`/api/prescriptions/search?q=${encodeURIComponent(keywords)}&limit=5`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.prescriptions && data.prescriptions.length > 0) {
+                // 过滤掉当前药方
+                const related = data.prescriptions.filter(p => p.id != prescription.id);
+                if (related.length > 0) {
+                    displayRelatedPrescriptions(related);
+                }
+            }
+        })
+        .catch(error => {
+            // 相关药方加载失败不影响主要功能，静默处理
+        });
+}
+
+// 显示相关药方
+function displayRelatedPrescriptions(prescriptions) {
+    const container = document.getElementById('relatedPrescriptions');
+    const listContainer = document.getElementById('relatedList');
+    
+    const html = prescriptions.map(prescription => `
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="card-title">
+                        <a href="/detail/${prescription.id}" class="text-decoration-none">
+                            ${prescription.name}
+                        </a>
+                    </h6>
+                    <div class="mb-2">
+                        <span class="badge bg-secondary">${prescription.category || '未分类'}</span>
+                    </div>
+                    <p class="card-text small text-muted">
+                        ${prescription.efficacy.substring(0, 80)}${prescription.efficacy.length > 80 ? '...' : ''}
+                    </p>
+                </div>
+            </div>
+        </div>
+    `).join('');
+    
+    listContainer.innerHTML = `<div class="row">${html}</div>`;
+    container.style.display = 'block';
+}
+
+// 加载分类选项
+function loadCategories() {
+    fetch('/api/categories')
+        .then(response => response.json())
+        .then(categories => {
+            const select = document.getElementById('editCategory');
+            categories.forEach(category => {
+                if (category) {
+                    select.innerHTML += `<option value="${category}">${category}</option>`;
+                }
+            });
+        })
+        .catch(error => {
+            // 分类加载失败不影响主要功能，静默处理
+        });
+}
+
+// 编辑药方
+function editPrescription() {
+    if (!prescriptionData) return;
+    
+    // 填充表单数据
+    document.getElementById('editId').value = prescriptionData.id;
+    document.getElementById('editName').value = prescriptionData.name;
+    document.getElementById('editCategory').value = prescriptionData.category || '';
+    document.getElementById('editEfficacy').value = prescriptionData.efficacy;
+    document.getElementById('editSymptoms').value = prescriptionData.symptoms || '';
+    document.getElementById('editIngredients').value = prescriptionData.ingredients || '';
+    document.getElementById('editUsage').value = prescriptionData.usage || '';
+    document.getElementById('editPrecautions').value = prescriptionData.precautions || '';
+    document.getElementById('editSource').value = prescriptionData.source || '';
+    
+    // 显示模态框
+    new bootstrap.Modal(document.getElementById('editPrescriptionModal')).show();
+}
+
+// 更新药方
+function updatePrescription() {
+    const form = document.getElementById('editPrescriptionForm');
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData);
+    
+    if (!data.name || !data.efficacy) {
+        showError('请填写必填字段');
+        return;
+    }
+    
+    fetch(`/api/prescriptions/${data.id}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.error) {
+            showError(result.error);
+        } else {
+            showSuccess('药方更新成功');
+            bootstrap.Modal.getInstance(document.getElementById('editPrescriptionModal')).hide();
+            loadPrescriptionDetail(); // 重新加载数据
+        }
+    })
+    .catch(error => {
+        showError('更新失败，请重试');
+    });
+}
+
+// 返回主页
+function goBack() {
+    // 直接跳转到主页，确保页面重新加载获取最新数据
+    window.location.href = '/';
+}
+
+// 格式化日期
+function formatDate(dateString) {
+    if (!dateString) return '未知日期';
+    
+    try {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+    } catch (error) {
+        return dateString;
+    }
+}
+
+// 显示成功消息
+function showSuccess(message) {
+    // 创建提示元素
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-success alert-dismissible fade show position-fixed';
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alertDiv);
+    
+    // 3秒后自动消失
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.parentNode.removeChild(alertDiv);
+        }
+    }, 3000);
+}
+
+// 显示错误消息
+function showError(message) {
+    // 创建提示元素
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-danger alert-dismissible fade show position-fixed';
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alertDiv);
+    
+    // 5秒后自动消失
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.parentNode.removeChild(alertDiv);
+        }
+    }, 5000);
+}
+</script>
+{% endblock %}
