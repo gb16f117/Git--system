@@ -1,0 +1,620 @@
+{% extends "base.html" %}
+
+{% block title %}首页 - 中药方管理系统{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- 左侧功能面板 -->
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-gear"></i> 功能操作
+                </h5>
+            </div>
+            <div class="card-body">
+                <button class="btn btn-primary w-100 mb-2" data-bs-toggle="modal" data-bs-target="#addPrescriptionModal">
+                    <i class="bi bi-plus-circle"></i> 添加药方
+                </button>
+                <button class="btn btn-outline-secondary w-100 mb-2" onclick="refreshList()">
+                    <i class="bi bi-arrow-clockwise"></i> 刷新列表
+                </button>
+
+                
+                <hr>
+                
+                <h6>快速筛选</h6>
+                <select class="form-select mb-2" id="categoryFilter" onchange="filterByCategory()">
+                    <option value="">所有分类</option>
+                </select>
+                
+                <div class="mt-3">
+                    <small class="text-muted">
+                        <i class="bi bi-info-circle"></i> 共 <span id="totalCount">0</span> 个药方
+                    </small>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 统计信息 -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6 class="card-title mb-0">
+                    <i class="bi bi-bar-chart"></i> 统计信息
+                </h6>
+            </div>
+            <div class="card-body">
+                <div id="statsContent">
+                    <div class="text-center">
+                        <div class="spinner-border spinner-border-sm" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 主内容区 -->
+    <div class="col-md-9">
+        <!-- 搜索栏 -->
+        <div class="card mb-3">
+            <div class="card-body">
+                <form id="searchForm" class="row g-3">
+                    <div class="col-md-8">
+                        <input type="text" class="form-control" id="searchInput" 
+                               placeholder="搜索药方名称、疗效、成分...">
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select" id="matchType">
+                            <option value="fuzzy">模糊匹配</option>
+                            <option value="and">全部关键词</option>
+                            <option value="or">任一关键词</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-success w-100" type="submit">
+                            <i class="bi bi-search"></i> 搜索
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        
+        <!-- 药方列表 -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-list-ul"></i> 药方列表
+                </h5>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-primary" onclick="changeView('list')">
+                        <i class="bi bi-list"></i> 列表
+                    </button>
+                    <button type="button" class="btn btn-outline-primary" onclick="changeView('grid')">
+                        <i class="bi bi-grid-3x3-gap"></i> 网格
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="prescriptionsList">
+                    <div class="text-center py-5">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                        <p class="mt-2">正在加载药方列表...</p>
+                    </div>
+                </div>
+                
+                <!-- 调试信息 -->
+                <div id="debugInfo" class="alert alert-info mt-3" style="display: none;">
+                    <h6>调试信息:</h6>
+                    <div id="debugContent"></div>
+                </div>
+                
+                <!-- 分页 -->
+                <nav aria-label="药方列表分页" class="mt-3">
+                    <ul class="pagination justify-content-center" id="pagination">
+                        <!-- 分页按钮将在这里动态生成 -->
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+let currentCategory = '';
+let currentSearch = '';
+
+// 页面加载完成后执行
+document.addEventListener('DOMContentLoaded', function() {
+    // 检查URL参数中是否有搜索关键词
+    const urlParams = new URLSearchParams(window.location.search);
+    const searchKeyword = urlParams.get('search');
+    
+    // 加载分类和统计信息
+    loadCategories();
+    loadStats();
+    
+    if (searchKeyword) {
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+            searchInput.value = searchKeyword;
+            performSearch();
+        } else {
+            loadPrescriptions();
+        }
+    } else {
+        loadPrescriptions();
+    }
+    
+    // 搜索表单提交
+    const searchForm = document.getElementById('searchForm');
+    if (searchForm) {
+        searchForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            currentSearch = document.getElementById('searchInput').value.trim();
+            if (currentSearch) {
+                performSearch();
+            } else {
+                loadPrescriptions();
+            }
+        });
+    }
+    
+    // 保存药方 - 等待modal完全加载后再绑定事件
+    setTimeout(() => {
+        const saveBtn = document.getElementById('savePrescription');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', savePrescription);
+        }
+    }, 100);
+});
+
+// 加载药方列表
+function loadPrescriptions(page = 1) {
+    // 构建URL参数
+    let url = '/api/prescriptions?page=' + page + '&limit=12';
+    
+    if (currentCategory) {
+        url += '&category=' + encodeURIComponent(currentCategory);
+    }
+    
+    fetch(url)
+        .then(function(response) {
+            if (!response.ok) {
+                throw new Error('网络响应错误: ' + response.status);
+            }
+            return response.json();
+        })
+        .then(function(data) {
+            if (data && data.prescriptions) {
+                displayPrescriptions(data.prescriptions);
+                updatePagination(data.page, data.pages, data.total);
+                
+                const totalCountElement = document.getElementById('totalCount');
+                if (totalCountElement) {
+                    totalCountElement.textContent = data.total;
+                }
+                
+                currentPage = data.page;
+            } else {
+                displayPrescriptions([]);
+            }
+        })
+        .catch(function(error) {
+            console.error('加载失败:', error);
+            displayPrescriptions([]);
+        });
+}
+
+// 显示药方列表
+function displayPrescriptions(prescriptions) {
+    const container = document.getElementById('prescriptionsList');
+    
+    if (!container) {
+        return;
+    }
+    
+    if (!prescriptions || prescriptions.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-5">
+                <i class="bi bi-inbox display-1 text-muted"></i>
+                <h5 class="mt-3 text-muted">暂无药方数据</h5>
+                <p class="text-muted">点击"添加药方"按钮开始添加数据</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    for (let i = 0; i < prescriptions.length; i++) {
+        const prescription = prescriptions[i];
+        
+        // 处理症状标签
+        let symptomsHtml = '';
+        if (prescription.symptoms) {
+            const tags = prescription.symptoms.split(/[,，、]/).slice(0, 3);
+            symptomsHtml = '<div class="mt-2">';
+            for (let j = 0; j < tags.length; j++) {
+                const tag = tags[j].trim();
+                symptomsHtml += `<span class="badge bg-light text-dark me-1 clickable-tag" data-tag="${tag}" onclick="filterByTag('${tag}')">${tag}</span>`;
+            }
+            if (prescription.symptoms.split(/[,，、]/).length > 3) {
+                symptomsHtml += '<span class="text-muted">...</span>';
+            }
+            symptomsHtml += '</div>';
+        }
+        
+        // 处理疗效文本
+        let efficacyText = '暂无疗效描述';
+        if (prescription.efficacy) {
+            efficacyText = prescription.efficacy.length > 50 ? prescription.efficacy.substring(0, 50) + '...' : prescription.efficacy;
+        }
+        
+        html += `
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <h6 class="card-title">
+                            <a href="/detail/${prescription.id}" class="text-decoration-none">
+                                ${prescription.name}
+                            </a>
+                        </h6>
+                        <div class="mb-2">
+                            <span class="badge bg-secondary">${prescription.category || '未分类'}</span>
+                        </div>
+                        <p class="card-text small text-muted">
+                            <strong>疗效：</strong>${efficacyText}
+                        </p>
+                        ${symptomsHtml}
+                        <div class="d-flex justify-content-between align-items-center">
+                            <small class="text-muted">
+                                <i class="bi bi-clock"></i> ${formatDate(prescription.created_at)}
+                            </small>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-primary btn-sm" onclick="viewDetail(${prescription.id})">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm" onclick="deletePrescription(${prescription.id})">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = `<div class="row">${html}</div>`;
+}
+
+// 更新分页
+function updatePagination(currentPage, totalPages, totalItems) {
+    const pagination = document.getElementById('pagination');
+    
+    if (totalPages <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    
+    // 上一页
+    html += `
+        <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="loadPrescriptions(${currentPage - 1}); return false;">
+                上一页
+            </a>
+        </li>
+    `;
+    
+    // 页码
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+            html += `
+                <li class="page-item ${i === currentPage ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="loadPrescriptions(${i}); return false;">
+                        ${i}
+                    </a>
+                </li>
+            `;
+        } else if (i === currentPage - 3 || i === currentPage + 3) {
+            html += '<li class="page-item disabled"><a class="page-link">...</a></li>';
+        }
+    }
+    
+    // 下一页
+    html += `
+        <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+            <a class="page-link" href="#" onclick="loadPrescriptions(${currentPage + 1}); return false;">
+                下一页
+            </a>
+        </li>
+    `;
+    
+    pagination.innerHTML = html;
+}
+
+// 加载分类
+function loadCategories() {
+    fetch('/api/categories')
+        .then(response => response.json())
+        .then(categories => {
+            const select = document.getElementById('categoryFilter');
+            const modalSelect = document.getElementById('categorySelect');
+            
+            categories.forEach(category => {
+                if (category) {
+                    select.innerHTML += `<option value="${category}">${category}</option>`;
+                    modalSelect.innerHTML += `<option value="${category}">${category}</option>`;
+                }
+            });
+        })
+        .catch(error => console.error('加载分类失败:', error));
+}
+
+// 按分类筛选
+function filterByCategory() {
+    currentCategory = document.getElementById('categoryFilter').value;
+    currentPage = 1;
+    loadPrescriptions();
+}
+
+
+
+// 刷新列表
+function refreshList() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('categoryFilter').value = '';
+    currentSearch = '';
+    currentCategory = '';
+    currentPage = 1;
+    loadPrescriptions();
+    showSuccess('列表已刷新');
+}
+
+// 查看详情
+function viewDetail(id) {
+    window.location.href = `/detail/${id}`;
+}
+
+// 删除药方
+function deletePrescription(id) {
+    if (!confirm('确定要删除这个药方吗？此操作不可恢复。')) {
+        return;
+    }
+    
+    fetch(`/api/prescriptions/${id}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            showError(data.error);
+        } else {
+            showSuccess('药方删除成功');
+            loadPrescriptions();
+        }
+    })
+    .catch(error => {
+        console.error('删除失败:', error);
+        showError('删除失败，请重试');
+    });
+}
+
+// 搜索
+function performSearch() {
+    const query = document.getElementById('searchInput').value.trim();
+    const matchType = document.getElementById('matchType').value;
+    
+    if (!query) {
+        loadPrescriptions();
+        return;
+    }
+    
+    const url = new URL('/api/prescriptions/search', window.location.origin);
+    url.searchParams.append('q', query);
+    url.searchParams.append('match_type', matchType);
+    url.searchParams.append('limit', 20);
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                showError(data.error);
+                return;
+            }
+            
+            displayPrescriptions(data.prescriptions);
+            document.getElementById('totalCount').textContent = data.total;
+            document.getElementById('pagination').innerHTML = '';
+        })
+        .catch(error => {
+            console.error('搜索失败:', error);
+            showError('搜索失败，请重试');
+        });
+}
+
+// 保存药方
+function savePrescription() {
+    const form = document.getElementById('addPrescriptionForm');
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData);
+    
+    if (!data.name || !data.efficacy) {
+        showError('请填写必填字段');
+        return;
+    }
+    
+    fetch('/api/prescriptions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.error) {
+            showError(result.error);
+        } else {
+            showSuccess('药方添加成功');
+            form.reset();
+            // 重置标签
+            symptomTags = [];
+            updateSymptomDisplay();
+            bootstrap.Modal.getInstance(document.getElementById('addPrescriptionModal')).hide();
+            loadPrescriptions();
+        }
+    })
+    .catch(error => {
+        console.error('保存失败:', error);
+        showError('保存失败，请重试');
+    });
+}
+
+// 加载统计信息
+function loadStats() {
+    fetch('/api/stats')
+        .then(response => response.json())
+        .then(stats => {
+            const container = document.getElementById('statsContent');
+            let html = `
+                <div class="mb-2">
+                    <strong>总药方数：</strong> ${stats.total_prescriptions}
+                </div>
+                <div class="mb-2">
+                    <strong>分类统计：</strong>
+                </div>
+            `;
+            
+            stats.category_stats.slice(0, 5).forEach(stat => {
+                html += `
+                    <div class="d-flex justify-content-between mb-1">
+                        <small>${stat.category}</small>
+                        <small class="text-primary">${stat.count}</small>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        })
+        .catch(error => console.error('加载统计失败:', error));
+}
+
+
+
+// 格式化日期
+function formatDate(dateString) {
+    if (!dateString) return '未知日期';
+    
+    try {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+    } catch (error) {
+        return dateString;
+    }
+}
+
+// 显示成功消息
+function showSuccess(message) {
+    // 创建提示元素
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-success alert-dismissible fade show position-fixed';
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alertDiv);
+    
+    // 3秒后自动消失
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.parentNode.removeChild(alertDiv);
+        }
+    }, 3000);
+}
+
+// 按标签筛选
+function filterByTag(tag) {
+    const url = new URL('/api/prescriptions/search', window.location.origin);
+    url.searchParams.append('q', tag);
+    url.searchParams.append('match_type', 'fuzzy');
+    url.searchParams.append('limit', 50);
+    
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                showError(data.error);
+                return;
+            }
+            
+            displayPrescriptions(data.prescriptions);
+            document.getElementById('totalCount').textContent = data.total;
+            document.getElementById('pagination').innerHTML = '';
+            
+            // 显示筛选状态
+            showInfo(`正在显示标签"${tag}"相关的药方 (${data.total}个)`);
+        })
+        .catch(error => {
+            console.error('筛选失败:', error);
+            showError('筛选失败，请重试');
+        });
+}
+
+// 显示信息消息
+function showInfo(message) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-info alert-dismissible fade show position-fixed';
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alertDiv);
+    
+    // 3秒后自动消失
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.parentNode.removeChild(alertDiv);
+        }
+    }, 3000);
+}
+
+// 显示错误消息
+function showError(message) {
+    // 创建提示元素
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-danger alert-dismissible fade show position-fixed';
+    alertDiv.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alertDiv);
+    
+    // 5秒后自动消失
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.parentNode.removeChild(alertDiv);
+        }
+    }, 5000);
+}
+</script>
+{% endblock %}
